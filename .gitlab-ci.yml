@@ -79,6 +79,8 @@ import:
   stage: import
   extends: .aws_setup
   script:
+    - echo "Initializing Terraform with backend configuration..."
+    - terraform init -reconfigure -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}"
     - echo "Importing S3 state bucket and DynamoDB lock table..."
     - terraform import module.s3.aws_s3_bucket.state_bucket "${TF_STATE_BUCKET}"
     - terraform import module.dynamodb.aws_dynamodb_table.state_lock_table "${TF_STATE_TABLE}"
@@ -94,6 +96,7 @@ validate:
   stage: validate
   extends: .aws_setup
   script:
+    - terraform init -reconfigure -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}"
     - terraform fmt -check -recursive
     - terraform validate
   dependencies:
@@ -119,6 +122,7 @@ apply:
   stage: apply
   extends: .aws_setup
   script:
+    - terraform init -reconfigure -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}"
     - terraform apply -input=false "planfile"
     - terraform output > output.txt
   artifacts:
@@ -134,6 +138,7 @@ destroy:
   stage: destroy
   extends: .aws_setup
   script:
+    - terraform init -reconfigure -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}"
     - terraform destroy --auto-approve
   when: manual
   dependencies:
