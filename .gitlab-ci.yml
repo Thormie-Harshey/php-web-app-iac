@@ -6,13 +6,13 @@ stages:
   - apply
   - destroy
 
-# Use a base image that has both a shell (sh) and a way to install packages
-# such as a git-alpine image.
+# Main Terraform image for all Terraform-specific jobs
 image:
   name: hashicorp/terraform:1.10
   entrypoint: [""]
 
 # Template for all Terraform-related jobs.
+# This template will install the AWS CLI and assume the OIDC role.
 .terraform_setup:
   id_tokens:
     GITLAB_OIDC_TOKEN:
@@ -31,11 +31,14 @@ image:
       --output text))
     - aws configure set region us-east-1
 
-# This new job will create the S3 bucket and DynamoDB table for state locking.
+# This job creates the S3 bucket and DynamoDB table for state locking.
+# It now correctly stands alone with its own image and setup script.
 create-backend-resources:
   stage: create-backend-resources
   image: alpine/git # Use an image with sh and a package manager
-  extends: .aws_cli_setup # Now uses the new template
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://gitlab.com
   before_script:
     - apk add --no-cache python3 py3-pip
     - pip3 install --no-cache-dir awscli --break-system-packages
