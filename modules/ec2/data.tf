@@ -37,10 +37,10 @@ data "aws_iam_policy_document" "rds_and_secret_manager" {
     ]
 
     resources = [
-      "arn:aws:secretsmanager:eu-west-2:442042522885:secret:*",
-      "arn:aws:rds:eu-west-2:442042522885:db:*",
-      "arn:aws:elasticfilesystem:eu-west-2:442042522885:file-system/*",
-      "arn:aws:elasticfilesystem:eu-west-2:442042522885:access-point/*"
+      "arn:aws:secretsmanager:us-east-1:442042522885:secret:*",
+      "arn:aws:rds:us-east-1:442042522885:db:*",
+      "arn:aws:elasticfilesystem:us-east-1:442042522885:file-system/*",
+      "arn:aws:elasticfilesystem:us-east-1:442042522885:access-point/*"
     ]
 
     effect = "Allow"

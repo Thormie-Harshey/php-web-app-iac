@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Set required variables
-AWS_REGION="eu-west-2"
+AWS_REGION="us-east-1"
 DB_INSTANCE_IDENTIFIER="wordpress-db"
 
 # Fetch the Secrets Manager secret ARN associated with the RDS instance

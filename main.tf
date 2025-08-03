@@ -2,6 +2,23 @@ provider "aws" {
   region = var.aws_region
 }
 
+# S3 module
+module "s3" {
+  source = "./modules/s3"
+
+  bucket_name = "${var.project_name}-bucketiac-${var.environment}"
+  environment = var.environment
+}
+
+# DynamoDB module
+module "dynamodb" {
+  source       = "./modules/dynamodb"
+
+  table_name   = "${var.project_name}-tableiac-${var.environment}"
+  hash_key     = "Lock_ID"
+  environment  = var.environment
+}
+
 # VPC and Network Module
 module "network" {
   source = "./modules/network"

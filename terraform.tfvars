@@ -1,4 +1,4 @@
-aws_region   = "eu-west-2"
+aws_region   = "us-east-1"
 project_name = "wordpress"
 environment  = "production"
 vpc_cidr     = "10.0.0.0/16"

@@ -31,7 +31,7 @@ statelock:
       --output text))
   script:
       # Check if the DynamoDB table already exists
-    - aws configure set region eu-west-2
+    - aws configure set region us-east-1
     - |
       TABLE_EXISTS=$(aws dynamodb describe-table --table-name tfstate-dynamo-lock 2>&1 || echo "not found")
       if [[ "$TABLE_EXISTS" == *"not found"* ]]; then
