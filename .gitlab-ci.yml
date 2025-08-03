@@ -35,7 +35,9 @@ image:
 # It now correctly stands alone with its own image and setup script.
 create-backend-resources:
   stage: create-backend-resources
-  image: alpine/git # Use an image with sh and a package manager
+  image:
+    name: alpine/git
+    entrypoint: ["/bin/sh", "-c"] # Override the entrypoint to use the shell
   id_tokens:
     GITLAB_OIDC_TOKEN:
       aud: https://gitlab.com
