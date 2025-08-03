@@ -1,6 +1,7 @@
 stages:
   - bootstrap
-  - setup
+  - init
+  - import
   - validate
   - plan
   - apply
@@ -57,23 +58,37 @@ bootstrap:
   when: manual
   allow_failure: true
 
-setup:
-  stage: setup
+# The 'init' job initializes the Terraform working directory and downloads modules.
+# It saves the .terraform directory as an artifact for the next stage.
+init:
+  stage: init
   extends: .aws_setup
   script:
     - echo "Initializing Terraform with backend configuration..."
     - terraform init -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}"
-    
-    - echo "Importing S3 state bucket and DynamoDB lock table..."
-    - terraform import module.s3.aws_s3_bucket.state_bucket "${TF_STATE_BUCKET}"
-    - terraform import module.dynamodb.aws_dynamodb_table.state_lock_table "${TF_STATE_TABLE}"
-    
   artifacts:
     paths:
       - .terraform/
       - .terraform.lock.hcl
   when: manual
   dependencies: []
+
+# The 'import' job imports the existing backend resources into the state file.
+# It depends on the 'init' job to get the initialized working directory.
+import:
+  stage: import
+  extends: .aws_setup
+  script:
+    - echo "Importing S3 state bucket and DynamoDB lock table..."
+    - terraform import module.s3.aws_s3_bucket.state_bucket "${TF_STATE_BUCKET}"
+    - terraform import module.dynamodb.aws_dynamodb_table.state_lock_table "${TF_STATE_TABLE}"
+  artifacts:
+    paths:
+      - .terraform/
+      - .terraform.lock.hcl
+  when: manual
+  dependencies:
+    - init
 
 validate:
   stage: validate
@@ -82,7 +97,7 @@ validate:
     - terraform fmt -check -recursive
     - terraform validate
   dependencies:
-    - setup
+    - import
 
 plan:
   stage: plan
@@ -98,7 +113,7 @@ plan:
     reports:
       terraform: planfile
   dependencies:
-    - setup
+    - import
 
 apply:
   stage: apply
@@ -122,4 +137,4 @@ destroy:
     - terraform destroy --auto-approve
   when: manual
   dependencies:
-    - setup
+    - import
