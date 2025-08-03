@@ -10,7 +10,7 @@ terraform {
   backend "s3" {
   #   bucket         = "infrabucket-iacgitops-us-east-1"
   key    = "wordpress/terraform.tfstate"
-  # region = "us-east-1"
+  region = "us-east-1"
     # dynamodb_table = "tfstate-dynamo-lock"
     encrypt        = true
   }
