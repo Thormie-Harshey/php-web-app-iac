@@ -12,11 +12,11 @@ module "s3" {
 
 # DynamoDB module
 module "dynamodb" {
-  source       = "./modules/dynamodb"
+  source = "./modules/dynamodb"
 
-  table_name   = "${var.project_name}-tableiac-${var.environment}"
-  hash_key     = "Lock_ID"
-  environment  = var.environment
+  table_name  = "${var.project_name}-tableiac-${var.environment}"
+  hash_key    = "Lock_ID"
+  environment = var.environment
 }
 
 # VPC and Network Module
