@@ -10,7 +10,7 @@ image:
   name: hashicorp/terraform:1.10
   entrypoint: [""]
 
-# Template for all Terraform-related jobs
+# Template for all Terraform-related jobs (these need the AWS CLI installed)
 .terraform_setup:
   id_tokens:
     GITLAB_OIDC_TOKEN:
@@ -29,12 +29,28 @@ image:
       --output text))
     - aws configure set region us-east-1
 
+# New template for jobs that already have the AWS CLI image
+.aws_cli_setup:
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://gitlab.com
+  before_script:
+    - >
+      export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s"
+      $(aws sts assume-role-with-web-identity
+      --role-arn ${ROLE_ARN}
+      --role-session-name "GitLabRunner-${CI_PROJECT_ID}-${CI_PIPELINE_ID}"
+      --web-identity-token ${GITLAB_OIDC_TOKEN}
+      --duration-seconds 3600
+      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]'
+      --output text))
+    - aws configure set region us-east-1
+
 # This job creates the S3 bucket and DynamoDB table for state locking.
-# It runs once and is a manual action.
 create-backend-resources:
   stage: create-backend-resources
   image: amazon/aws-cli:latest
-  extends: .terraform_setup
+  extends: .aws_cli_setup # Now uses the new template
   script:
     - echo "Checking if S3 bucket ${TF_STATE_BUCKET} exists..."
     - >
@@ -71,7 +87,6 @@ init:
     paths:
       - .terraform/
       - .terraform.lock.hcl
-  when: manual
   dependencies:
     - create-backend-resources
 
