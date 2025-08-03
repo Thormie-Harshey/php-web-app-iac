@@ -1,61 +1,25 @@
+# Define the pipeline stages in order of execution.
 stages:
-  - dynamodb
-  - init
+  - bootstrap
+  - setup
   - validate
   - plan
   - apply
   - destroy
 
+# Use a standard Terraform Docker image for all jobs.
 image:
   name: hashicorp/terraform:1.10
-  entrypoint: [""]
+  entrypoint: ["/bin/sh", "-c"]
 
-statelock:
+# Define a hidden job with common setup for AWS authentication.
+.aws_setup:
   id_tokens:
     GITLAB_OIDC_TOKEN:
       aud: https://gitlab.com
-  stage: dynamodb
-  image: 
-    name: amazon/aws-cli:latest
-    entrypoint: [""]
   before_script:
-  # Establish connection with AWS to get access credentials
-    - >
-      export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s"
-      $(aws sts assume-role-with-web-identity
-      --role-arn ${ROLE_ARN}
-      --role-session-name "GitLabRunner-${CI_PROJECT_ID}-${CI_PIPELINE_ID}"
-      --web-identity-token ${GITLAB_OIDC_TOKEN}
-      --duration-seconds 3600
-      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]'
-      --output text))
-  script:
-      # Check if the DynamoDB table already exists
-    - aws configure set region us-east-1
-    - |
-      TABLE_EXISTS=$(aws dynamodb describe-table --table-name tfstate-dynamo-lock 2>&1 || echo "not found")
-      if [[ "$TABLE_EXISTS" == *"not found"* ]]; then
-        echo "Table does not exist, creating it..."
-        aws dynamodb create-table \
-          --table-name tfstate-dynamo-lock \
-          --attribute-definitions AttributeName=LockID,AttributeType=S \
-          --key-schema AttributeName=LockID,KeyType=HASH \
-          --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5
-      else
-        echo "Table already exists, skipping creation."
-      fi
-      
-init:
-  id_tokens:
-    GITLAB_OIDC_TOKEN:
-      aud: https://gitlab.com
-  stage: init
-  before_script:
-  # Install AWS CLI
     - apk --no-cache add curl python3 py3-pip
     - pip3 install --no-cache-dir awscli --break-system-packages
-  
-  # Establish connection with AWS to get access credentials
     - >
       export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s"
       $(aws sts assume-role-with-web-identity
@@ -65,87 +29,94 @@ init:
       --duration-seconds 3600
       --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]'
       --output text))
+    - aws configure set region us-east-1
+
+# This job creates the S3 bucket and DynamoDB table for Terraform state.
+# It is manual and should be run only once to set up the backend.
+bootstrap:
+  stage: bootstrap
+  extends: .aws_setup
   script:
-    - terraform init 
+    - echo "Checking if S3 bucket ${TF_STATE_BUCKET} exists..."
+    - >
+      if aws s3api head-bucket --bucket ${TF_STATE_BUCKET} 2>/dev/null; then
+        echo "S3 bucket already exists, skipping creation."
+      else
+        echo "S3 bucket does not exist, creating it..."
+        aws s3api create-bucket --bucket ${TF_STATE_BUCKET}
+        echo "Bucket created. Enabling versioning..."
+        aws s3api put-bucket-versioning --bucket ${TF_STATE_BUCKET} --versioning-configuration Status=Enabled
+      fi
+    - echo "Checking if DynamoDB table ${TF_STATE_TABLE} exists..."
+    - >
+      if aws dynamodb describe-table --table-name ${TF_STATE_TABLE} 2>/dev/null; then
+        echo "DynamoDB table already exists, skipping creation."
+      else
+        echo "DynamoDB table does not exist, creating it..."
+        aws dynamodb create-table \
+          --table-name ${TF_STATE_TABLE} \
+          --attribute-definitions AttributeName=LockID,AttributeType=S \
+          --key-schema AttributeName=LockID,KeyType=HASH \
+          --billing-mode PAY_PER_REQUEST
+      fi
+  when: manual
+  allow_failure: true
+
+# This is a one-time manual job. It initializes Terraform and imports
+# the backend resources (S3 bucket and DynamoDB table) into the state file.
+# It saves the state file as an artifact for subsequent jobs.
+setup:
+  stage: setup
+  extends: .aws_setup
+  script:
+    - echo "Initializing Terraform with backend configuration..."
+    - terraform init -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}"
+    
+    - echo "Importing S3 state bucket and DynamoDB lock table..."
+    - terraform import module.s3.aws_s3_bucket.state_bucket "${TF_STATE_BUCKET}"
+    - terraform import module.dynamodb_state_lock.aws_dynamodb_table.state_lock_table "${TF_STATE_TABLE}"
+    
   artifacts:
     paths:
       - .terraform/
       - .terraform.lock.hcl
+  when: manual
+  dependencies: []
 
+# This job validates the Terraform code for syntax and configuration.
+# It depends on the 'setup' job to get the initialized state and providers.
 validate:
-  id_tokens:
-    GITLAB_OIDC_TOKEN:
-      aud: https://gitlab.com
   stage: validate
-  before_script:
-  # Install AWS CLI
-    - apk --no-cache add curl python3 py3-pip
-    - pip3 install --no-cache-dir awscli --break-system-packages
-  
-  # Establish connection with AWS to get access credentials
-    - >
-      export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s"
-      $(aws sts assume-role-with-web-identity
-      --role-arn ${ROLE_ARN}
-      --role-session-name "GitLabRunner-${CI_PROJECT_ID}-${CI_PIPELINE_ID}"
-      --web-identity-token ${GITLAB_OIDC_TOKEN}
-      --duration-seconds 3600
-      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]'
-      --output text))
+  extends: .aws_setup
   script:
     - terraform fmt -check -recursive
     - terraform validate
+  dependencies:
+    - setup
 
+# This job creates a Terraform plan and saves it as an artifact.
+# It depends on 'setup' and uses a re-init to ensure it has the latest state.
 plan:
-  id_tokens:
-    GITLAB_OIDC_TOKEN:
-      aud: https://gitlab.com
   stage: plan
-  before_script:
-  # Install AWS CLI
-    - apk --no-cache add curl python3 py3-pip
-    - pip3 install --no-cache-dir awscli --break-system-packages
-  
-  # Establish connection with AWS to get access credentials
-    - >
-      export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s"
-      $(aws sts assume-role-with-web-identity
-      --role-arn ${ROLE_ARN}
-      --role-session-name "GitLabRunner-${CI_PROJECT_ID}-${CI_PIPELINE_ID}"
-      --web-identity-token ${GITLAB_OIDC_TOKEN}
-      --duration-seconds 3600
-      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]'
-      --output text))
+  extends: .aws_setup
   script:
-    - terraform plan -out "planfile"
+    - terraform init -reconfigure -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}"
+    - terraform plan -out="planfile"
     - terraform show -no-color planfile > planfile.txt
   artifacts:
     paths:
       - planfile
-      - planfile.txt
+      - .terraform.lock.hcl
     reports:
       terraform: planfile
+  dependencies:
+    - setup
 
+# This job applies the plan to create the infrastructure.
+# It is manual to prevent accidental changes and depends on 'plan'.
 apply:
-  id_tokens:
-    GITLAB_OIDC_TOKEN:
-      aud: https://gitlab.com
   stage: apply
-  before_script:
-  # Install AWS CLI
-    - apk --no-cache add curl python3 py3-pip
-    - pip3 install --no-cache-dir awscli --break-system-packages
-  
-  # Establish connection with AWS to get access credentials
-    - >
-      export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s"
-      $(aws sts assume-role-with-web-identity
-      --role-arn ${ROLE_ARN}
-      --role-session-name "GitLabRunner-${CI_PROJECT_ID}-${CI_PIPELINE_ID}"
-      --web-identity-token ${GITLAB_OIDC_TOKEN}
-      --duration-seconds 3600
-      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]'
-      --output text))
+  extends: .aws_setup
   script:
     - terraform apply -input=false "planfile"
     - terraform output > output.txt
@@ -155,27 +126,16 @@ apply:
     reports:
       terraform: output.txt
   when: manual
+  dependencies:
+    - plan
 
+# This job destroys the entire infrastructure.
+# It is manual and should be run with extreme caution.
 destroy:
-  id_tokens:
-    GITLAB_OIDC_TOKEN:
-      aud: https://gitlab.com
   stage: destroy
-  before_script:
-  # Install AWS CLI
-    - apk --no-cache add curl python3 py3-pip
-    - pip3 install --no-cache-dir awscli --break-system-packages
-  
-  # Establish connection with AWS to get access credentials
-    - >
-      export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s"
-      $(aws sts assume-role-with-web-identity
-      --role-arn ${ROLE_ARN}
-      --role-session-name "GitLabRunner-${CI_PROJECT_ID}-${CI_PIPELINE_ID}"
-      --web-identity-token ${GITLAB_OIDC_TOKEN}
-      --duration-seconds 3600
-      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]'
-      --output text))
+  extends: .aws_setup
   script:
     - terraform destroy --auto-approve
   when: manual
+  dependencies:
+    - setup
