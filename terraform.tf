@@ -7,11 +7,11 @@ terraform {
   }
   required_version = ">= 1.6.0"
 
-  # backend "s3" {
+  backend "s3" {
   #   bucket         = "infrabucket-iacgitops-us-east-1"
-  # key    = "tfstate-wordpress-prod/terraform.tfstate"
+  key    = "wordpress/terraform.tfstate"
   # region = "us-east-1"
-  #   dynamodb_table = "tfstate-dynamo-lock"
-  #   encrypt        = true
-  # }
+    # dynamodb_table = "tfstate-dynamo-lock"
+    encrypt        = true
+  }
 }

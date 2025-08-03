@@ -85,7 +85,9 @@ init:
   extends: .terraform_setup
   script:
     - echo "Initializing Terraform with backend configuration..."
-    - terraform init -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}"
+        # The -reconfigure flag is useful to apply new backend settings
+    - terraform init -reconfigure -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}" -backend-config="region=us-east-1"
+    # - terraform init -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}"
   artifacts:
     paths:
       - .terraform/
