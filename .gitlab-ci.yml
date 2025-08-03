@@ -1,4 +1,3 @@
-# Define the pipeline stages in order of execution.
 stages:
   - bootstrap
   - setup
@@ -7,12 +6,10 @@ stages:
   - apply
   - destroy
 
-# Use a standard Terraform Docker image for all jobs.
 image:
   name: hashicorp/terraform:1.10
   entrypoint: ["/bin/sh", "-c"]
 
-# Define a hidden job with common setup for AWS authentication.
 .aws_setup:
   id_tokens:
     GITLAB_OIDC_TOKEN:
@@ -31,8 +28,6 @@ image:
       --output text))
     - aws configure set region us-east-1
 
-# This job creates the S3 bucket and DynamoDB table for Terraform state.
-# It is manual and should be run only once to set up the backend.
 bootstrap:
   stage: bootstrap
   extends: .aws_setup
@@ -62,9 +57,6 @@ bootstrap:
   when: manual
   allow_failure: true
 
-# This is a one-time manual job. It initializes Terraform and imports
-# the backend resources (S3 bucket and DynamoDB table) into the state file.
-# It saves the state file as an artifact for subsequent jobs.
 setup:
   stage: setup
   extends: .aws_setup
@@ -74,7 +66,7 @@ setup:
     
     - echo "Importing S3 state bucket and DynamoDB lock table..."
     - terraform import module.s3.aws_s3_bucket.state_bucket "${TF_STATE_BUCKET}"
-    - terraform import module.dynamodb_state_lock.aws_dynamodb_table.state_lock_table "${TF_STATE_TABLE}"
+    - terraform import module.dynamodb.aws_dynamodb_table.state_lock_table "${TF_STATE_TABLE}"
     
   artifacts:
     paths:
@@ -83,8 +75,6 @@ setup:
   when: manual
   dependencies: []
 
-# This job validates the Terraform code for syntax and configuration.
-# It depends on the 'setup' job to get the initialized state and providers.
 validate:
   stage: validate
   extends: .aws_setup
@@ -94,8 +84,6 @@ validate:
   dependencies:
     - setup
 
-# This job creates a Terraform plan and saves it as an artifact.
-# It depends on 'setup' and uses a re-init to ensure it has the latest state.
 plan:
   stage: plan
   extends: .aws_setup
@@ -112,8 +100,6 @@ plan:
   dependencies:
     - setup
 
-# This job applies the plan to create the infrastructure.
-# It is manual to prevent accidental changes and depends on 'plan'.
 apply:
   stage: apply
   extends: .aws_setup
@@ -129,8 +115,6 @@ apply:
   dependencies:
     - plan
 
-# This job destroys the entire infrastructure.
-# It is manual and should be run with extreme caution.
 destroy:
   stage: destroy
   extends: .aws_setup
