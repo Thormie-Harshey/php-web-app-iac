@@ -101,7 +101,6 @@ validate:
     paths:
       - .terraform/
       - .terraform.lock.hcl
-    expire_in: 1 hour # You can set an expiration time for artifacts
   dependencies:
     - init
 
@@ -114,7 +113,8 @@ plan:
   artifacts:
     paths:
       - planfile
-      - .terraform.lock.hcl
+      - .terraform/ # <-- ADDED: The .terraform directory is needed for subsequent jobs.
+      - .terraform.lock.hcl # <-- ADDED: The lock file is also critical.
     reports:
       terraform: planfile
   dependencies:
@@ -129,6 +129,8 @@ apply:
   artifacts:
     paths:
       - output.txt
+      - .terraform/ # <-- ADDED: Also needed for destroy stage.
+      - .terraform.lock.hcl
     reports:
       terraform: output.txt
   when: manual
@@ -142,4 +144,4 @@ destroy:
     - terraform destroy --auto-approve
   when: manual
   dependencies:
-    - plan
+    - apply # <-- CHANGED: Dependency should be on the 'apply' job to get the latest state/artifacts.
