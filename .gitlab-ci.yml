@@ -97,6 +97,11 @@ validate:
   script:
     - terraform fmt -check -recursive
     - terraform validate
+  artifacts:
+    paths:
+      - .terraform/
+      - .terraform.lock.hcl
+    expire_in: 1 hour # You can set an expiration time for artifacts
   dependencies:
     - init
 
