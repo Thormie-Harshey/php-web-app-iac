@@ -6,13 +6,11 @@ stages:
   - apply
   - destroy
 
-# Main Terraform image for all Terraform-specific jobs
 image:
   name: hashicorp/terraform:1.10
   entrypoint: [""]
 
-# Template for all Terraform-related jobs.
-# This template will install the AWS CLI and assume the OIDC role.
+# Shared setup: installs AWS CLI and assumes OIDC role
 .terraform_setup:
   id_tokens:
     GITLAB_OIDC_TOKEN:
@@ -29,15 +27,14 @@ image:
       --duration-seconds 3600
       --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]'
       --output text))
-    - aws configure set region us-east-1
+    - aws configure set region ${AWS_REGION}
 
-# This job creates the S3 bucket and DynamoDB table for state locking.
-# It now correctly stands alone with its own image and setup script.
+# Create S3 bucket and DynamoDB table for remote backend
 create-backend-resources:
   stage: create-backend-resources
   image:
     name: alpine/git
-    entrypoint: ["/bin/sh", "-c"] # Override the entrypoint to use the shell
+    entrypoint: ["/bin/sh", "-c"]
   id_tokens:
     GITLAB_OIDC_TOKEN:
       aud: https://gitlab.com
@@ -53,24 +50,23 @@ create-backend-resources:
       --duration-seconds 3600
       --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]'
       --output text))
-    - aws configure set region us-east-1
+    - aws configure set region ${AWS_REGION}
   script:
     - echo "Checking if S3 bucket ${TF_STATE_BUCKET} exists..."
     - >
       if aws s3api head-bucket --bucket ${TF_STATE_BUCKET} 2>/dev/null; then
-        echo "S3 bucket already exists, skipping creation."
+        echo "S3 bucket already exists."
       else
-        echo "S3 bucket does not exist, creating it..."
+        echo "Creating S3 bucket..."
         aws s3api create-bucket --bucket ${TF_STATE_BUCKET}
-        echo "Bucket created. Enabling versioning..."
         aws s3api put-bucket-versioning --bucket ${TF_STATE_BUCKET} --versioning-configuration Status=Enabled
       fi
     - echo "Checking if DynamoDB table ${TF_STATE_TABLE} exists..."
     - >
       if aws dynamodb describe-table --table-name ${TF_STATE_TABLE} 2>/dev/null; then
-        echo "DynamoDB table already exists, skipping creation."
+        echo "DynamoDB table already exists."
       else
-        echo "DynamoDB table does not exist, creating it..."
+        echo "Creating DynamoDB table..."
         aws dynamodb create-table \
           --table-name ${TF_STATE_TABLE} \
           --attribute-definitions AttributeName=LockID,AttributeType=S \
@@ -79,15 +75,16 @@ create-backend-resources:
       fi
   when: manual
   allow_failure: false
-  
+
 init:
   stage: init
   extends: .terraform_setup
   script:
-    - echo "Initializing Terraform with backend configuration..."
-        # The -reconfigure flag is useful to apply new backend settings
-    - terraform init -reconfigure -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}" -backend-config="region=us-east-1"
-    # - terraform init -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}"
+    - echo "Initializing Terraform with backend..."
+    - terraform init -reconfigure \
+        -backend-config="bucket=${TF_STATE_BUCKET}" \
+        -backend-config="dynamodb_table=${TF_STATE_TABLE}" \
+        -backend-config="region=${AWS_REGION}"
   artifacts:
     paths:
       - .terraform/
@@ -99,7 +96,6 @@ validate:
   stage: validate
   extends: .terraform_setup
   script:
-    - terraform init -reconfigure -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}"
     - terraform fmt -check -recursive
     - terraform validate
   dependencies:
@@ -109,12 +105,12 @@ plan:
   stage: plan
   extends: .terraform_setup
   script:
-    - terraform init -reconfigure -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}"
     - terraform plan -out="planfile"
     - terraform show -no-color planfile > planfile.txt
   artifacts:
     paths:
       - planfile
+      - planfile.txt
       - .terraform.lock.hcl
     reports:
       terraform: planfile
@@ -125,7 +121,6 @@ apply:
   stage: apply
   extends: .terraform_setup
   script:
-    - terraform init -reconfigure -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}"
     - terraform apply -input=false "planfile"
     - terraform output > output.txt
   artifacts:
@@ -141,7 +136,6 @@ destroy:
   stage: destroy
   extends: .terraform_setup
   script:
-    - terraform init -reconfigure -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_STATE_TABLE}"
     - terraform destroy --auto-approve
   when: manual
   dependencies:
