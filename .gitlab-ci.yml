@@ -10,7 +10,6 @@ image:
   name: hashicorp/terraform:1.10
   entrypoint: [""]
 
-# Shared setup: installs AWS CLI and assumes OIDC role
 .terraform_setup:
   id_tokens:
     GITLAB_OIDC_TOKEN:
@@ -29,7 +28,6 @@ image:
       --output text))
     - aws configure set region ${AWS_REGION}
 
-# Create S3 bucket and DynamoDB table for remote backend
 create-backend-resources:
   stage: create-backend-resources
   image:
@@ -58,7 +56,7 @@ create-backend-resources:
         echo "S3 bucket already exists."
       else
         echo "Creating S3 bucket..."
-        aws s3api create-bucket --bucket ${TF_STATE_BUCKET}
+        aws s3api create-bucket --bucket ${TF_STATE_BUCKET} --region ${AWS_REGION}
         aws s3api put-bucket-versioning --bucket ${TF_STATE_BUCKET} --versioning-configuration Status=Enabled
       fi
     - echo "Checking if DynamoDB table ${TF_STATE_TABLE} exists..."
@@ -105,7 +103,7 @@ plan:
   stage: plan
   extends: .terraform_setup
   script:
-    - terraform plan -out="planfile"
+    - terraform plan -out=planfile
     - terraform show -no-color planfile > planfile.txt
   artifacts:
     paths:
@@ -121,13 +119,11 @@ apply:
   stage: apply
   extends: .terraform_setup
   script:
-    - terraform apply -input=false "planfile"
+    - terraform apply -input=false planfile
     - terraform output > output.txt
   artifacts:
     paths:
       - output.txt
-    reports:
-      terraform: output.txt
   when: manual
   dependencies:
     - plan
